@@ -1,7 +1,7 @@
 # 🧬 HMMAlign
 ## High-Performance Viterbi Engine for Reference-Guided Signal Alignment
 
-## Overview:
+## 🧠 Overview:
 
 HMMAlign is a standalone computational framework designed for high-fidelity mapping of noisy sequencing traces to genomic references. By leveraging a Hidden Markov Model (HMM) and the Viterbi algorithm, the engine resolves translocation speed variability and indel noise that purely neural-based basecallers often struggle to handle.
 
@@ -54,11 +54,27 @@ The core engine is being developed with a focus on low-latency primary analysis:
 - [ ] Benchmarking: Comparison against standard alignment tools (e.g., BWA-MEM) for signal-level accuracy.
 
 -----------------------------------
+## 📂 Folder Structure
+
+```
+├── .github/          # Workflows for CI/CD
+├── src/              # C++ Source (The Viterbi Engine)
+│   ├── viterbi.cpp
+│   └── hmm_model.hpp
+├── python/           # Python Bindings (Pybind11/Nanobind)
+│   └── hmmalign/
+├── tests/            # Unit tests for DP matrix accuracy
+├── notebooks/        # Research and visualization of paths
+├── pyproject.toml    # Modern dependency management
+└── README.md         # The technical blueprint
+```
+
+-----------------------------------
 ## 🔬 Industry Context
 
 In the development of next-generation sequencing platforms, the transition from "raw squiggle" to "mapped read" is the most critical computational bottleneck. HMMAlign demonstrates a modular approach to this problem, separating the feature extraction (Deep Learning) from the sequence logic (Classical Algorithms).
 
 -----------------------------------
-## 📜 License
+## 📘 License
 
 MIT License
