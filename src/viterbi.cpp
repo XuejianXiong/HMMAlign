@@ -25,6 +25,7 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
     const size_t width = ref_len + 1;
     const size_t total = (read_len + 1) * width;
     const double neg_inf = -std::numeric_limits<double>::infinity();
+    const size_t bandwidth = params.bandwidth < 0 ? 0 : static_cast<size_t>(params.bandwidth);
 
     std::vector<double> M(total, neg_inf), I(total, neg_inf), D(total, neg_inf);
     // 0: Match, 1: Insert, 2: Delete
@@ -33,11 +34,13 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
     M[0] = 0.0;
 
     for (size_t i = 0; i <= read_len; ++i) {
-        for (size_t j = 0; j <= ref_len; ++j) {
+        const size_t j_start = (i > bandwidth ? i - bandwidth : 0);
+        const size_t j_end = std::min(ref_len, i + bandwidth);
+
+        for (size_t j = j_start; j <= j_end; ++j) {
             if (i == 0 && j == 0) continue;
             size_t cur = index_2d(i, j, width);
 
-            // --- Match State ---
             if (i > 0 && j > 0) {
                 size_t diag = index_2d(i - 1, j - 1, width);
                 double emit = (read[i - 1] == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
@@ -51,7 +54,6 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
                 else                      { M[cur] = sD + emit; ptrM[cur] = 2; }
             }
 
-            // --- Insertion State (Gap in Ref) ---
             if (i > 0) {
                 size_t up = index_2d(i - 1, j, width);
                 double sM = M[up] + params.M_to_I;
@@ -61,7 +63,6 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
                 else          { I[cur] = sI; ptrI[cur] = 1; }
             }
 
-            // --- Deletion State (Gap in Read) ---
             if (j > 0) {
                 size_t left = index_2d(i, j - 1, width);
                 double sM = M[left] + params.M_to_D;
@@ -73,26 +74,44 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
         }
     }
 
-    // --- Traceback ---
     size_t ci = read_len, cj = ref_len;
     std::string path = "";
-    
-    // Pick starting state
     size_t last = index_2d(ci, cj, width);
-    int8_t state; 
+    int8_t state;
     double final_score;
+
     if (M[last] >= I[last] && M[last] >= D[last]) { state = 0; final_score = M[last]; }
     else if (I[last] >= D[last])                 { state = 1; final_score = I[last]; }
     else                                         { state = 2; final_score = D[last]; }
 
+    if (final_score == neg_inf) {
+        return {neg_inf, ""};
+    }
+
     while (ci > 0 || cj > 0) {
         size_t cur = index_2d(ci, cj, width);
-        if (state == 0) { path += 'M'; state = ptrM[cur]; ci--; cj--; }
-        else if (state == 1) { path += 'I'; state = ptrI[cur]; ci--; }
-        else if (state == 2) { path += 'D'; state = ptrD[cur]; cj--; }
-    }
-    std::reverse(path.begin(), path.end());
+        int8_t prev_state = state;
+        if (state == 0) {
+            if (ptrM[cur] < 0) return {neg_inf, ""};
+            state = ptrM[cur];
+            ci--; cj--;
+        } else if (state == 1) {
+            if (ptrI[cur] < 0) return {neg_inf, ""};
+            state = ptrI[cur];
+            ci--;
+        } else {
+            if (ptrD[cur] < 0) return {neg_inf, ""};
+            state = ptrD[cur];
+            cj--;
+        }
 
+        if (ci > read_len || cj > ref_len) {
+            return {neg_inf, ""};
+        }
+        path += (prev_state == 0 ? 'M' : prev_state == 1 ? 'I' : 'D');
+    }
+
+    std::reverse(path.begin(), path.end());
     return {final_score, path};
 }
 
@@ -105,7 +124,8 @@ PYBIND11_MODULE(_core, m) {
         .def_readwrite("I_to_M", &ModelParams::I_to_M)
         .def_readwrite("I_to_I", &ModelParams::I_to_I)
         .def_readwrite("D_to_M", &ModelParams::D_to_M)
-        .def_readwrite("D_to_D", &ModelParams::D_to_D);
+        .def_readwrite("D_to_D", &ModelParams::D_to_D)
+        .def_readwrite("bandwidth", &ModelParams::bandwidth);
 
     py::class_<AlignResult>(m, "AlignResult")
         .def_readonly("score", &AlignResult::score)
