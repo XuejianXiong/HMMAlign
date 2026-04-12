@@ -1,5 +1,5 @@
 # 🧬 HMMAlign
-## High-Performance Viterbi Engine for Reference-Guided Signal Alignment
+## High-Performance Viterbi Engine for Reference-Guided Sequence Alignment
 
 ## 🧠 Overview:
 
