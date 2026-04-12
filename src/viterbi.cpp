@@ -12,7 +12,6 @@ static inline size_t index_2d(size_t i, size_t j, size_t width) {
     return i * width + j;
 }
 
-// Result structure to return to Python
 struct AlignResult {
     double score;
     std::string path;
@@ -28,20 +27,25 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
     const size_t bandwidth = params.bandwidth < 0 ? 0 : static_cast<size_t>(params.bandwidth);
 
     std::vector<double> M(total, neg_inf), I(total, neg_inf), D(total, neg_inf);
-    // 0: Match, 1: Insert, 2: Delete
     std::vector<int8_t> ptrM(total, -1), ptrI(total, -1), ptrD(total, -1);
 
-    M[0] = 0.0;
+    // --- 1. Glocal Initialization ---
+    // The read can start anywhere in the reference at i=0 for free (score 0.0).
+    // This creates the "Landing Strip" for the traceback to find.
+    for (size_t j = 0; j <= ref_len; ++j) {
+        M[index_2d(0, j, width)] = 0.0;
+    }
 
-    for (size_t i = 0; i <= read_len; ++i) {
+    // --- 2. Main DP Fill ---
+    for (size_t i = 1; i <= read_len; ++i) {
         const size_t j_start = (i > bandwidth ? i - bandwidth : 0);
         const size_t j_end = std::min(ref_len, i + bandwidth);
 
         for (size_t j = j_start; j <= j_end; ++j) {
-            if (i == 0 && j == 0) continue;
             size_t cur = index_2d(i, j, width);
 
-            if (i > 0 && j > 0) {
+            // Match State
+            if (j > 0) {
                 size_t diag = index_2d(i - 1, j - 1, width);
                 double emit = (read[i - 1] == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
                 
@@ -49,66 +53,86 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
                 double sI = I[diag] + params.I_to_M;
                 double sD = D[diag] + params.D_to_M;
 
-                if (sM >= sI && sM >= sD) { M[cur] = sM + emit; ptrM[cur] = 0; }
-                else if (sI >= sD)         { M[cur] = sI + emit; ptrM[cur] = 1; }
-                else                      { M[cur] = sD + emit; ptrM[cur] = 2; }
+                double best = std::max({sM, sI, sD});
+                if (best > neg_inf) {
+                    M[cur] = best + emit;
+                    if (sM >= sI && sM >= sD)      ptrM[cur] = 0;
+                    else if (sI >= sD)            ptrM[cur] = 1;
+                    else                          ptrM[cur] = 2;
+                }
             }
 
-            if (i > 0) {
-                size_t up = index_2d(i - 1, j, width);
-                double sM = M[up] + params.M_to_I;
-                double sI = I[up] + params.I_to_I;
-
-                if (sM >= sI) { I[cur] = sM; ptrI[cur] = 0; }
-                else          { I[cur] = sI; ptrI[cur] = 1; }
+            // Insertion (Gap in Reference)
+            size_t up = index_2d(i - 1, j, width);
+            double sM_i = M[up] + params.M_to_I;
+            double sI_i = I[up] + params.I_to_I;
+            double best_i = std::max(sM_i, sI_i);
+            if (best_i > neg_inf) {
+                I[cur] = best_i;
+                ptrI[cur] = (sM_i >= sI_i) ? 0 : 1;
             }
 
+            // Deletion (Gap in Read)
             if (j > 0) {
                 size_t left = index_2d(i, j - 1, width);
-                double sM = M[left] + params.M_to_D;
-                double sD = D[left] + params.D_to_D;
-
-                if (sM >= sD) { D[cur] = sM; ptrD[cur] = 0; }
-                else          { D[cur] = sD; ptrD[cur] = 2; }
+                double sM_d = M[left] + params.M_to_D;
+                double sD_d = D[left] + params.D_to_D;
+                double best_d = std::max(sM_d, sD_d);
+                if (best_d > neg_inf) {
+                    D[cur] = best_d;
+                    ptrD[cur] = (sM_d >= sD_d) ? 0 : 2;
+                }
             }
         }
     }
 
-    size_t ci = read_len, cj = ref_len;
-    std::string path = "";
-    size_t last = index_2d(ci, cj, width);
-    int8_t state;
-    double final_score;
+    // --- 3. Find Best Terminal Score (Glocal: Scan the entire last row) ---
+    double final_score = neg_inf;
+    size_t best_j = 0;
+    int8_t state = -1; // 0:M, 1:I, 2:D
 
-    if (M[last] >= I[last] && M[last] >= D[last]) { state = 0; final_score = M[last]; }
-    else if (I[last] >= D[last])                 { state = 1; final_score = I[last]; }
-    else                                         { state = 2; final_score = D[last]; }
-
-    if (final_score == neg_inf) {
-        return {neg_inf, ""};
+    for (size_t j = 0; j <= ref_len; ++j) {
+        size_t idx = index_2d(read_len, j, width);
+        if (M[idx] > final_score) { final_score = M[idx]; best_j = j; state = 0; }
+        if (I[idx] > final_score) { final_score = I[idx]; best_j = j; state = 1; }
+        if (D[idx] > final_score) { final_score = D[idx]; best_j = j; state = 2; }
     }
+    
+    if (final_score == neg_inf) return {neg_inf, ""};
 
-    while (ci > 0 || cj > 0) {
+    // --- 4. Traceback ---
+    size_t ci = read_len, cj = best_j;
+    std::string path = "";
+    path.reserve(read_len * 2);
+
+    while (ci > 0) {
         size_t cur = index_2d(ci, cj, width);
-        int8_t prev_state = state;
-        if (state == 0) {
-            if (ptrM[cur] < 0) return {neg_inf, ""};
+        int8_t current_state = state;
+
+        if (current_state == 0) { // Match
+            path += 'M';
             state = ptrM[cur];
             ci--; cj--;
-        } else if (state == 1) {
-            if (ptrI[cur] < 0) return {neg_inf, ""};
+        } else if (current_state == 1) { // Insertion
+            path += 'I';
             state = ptrI[cur];
             ci--;
-        } else {
-            if (ptrD[cur] < 0) return {neg_inf, ""};
+        } else if (current_state == 2) { // Deletion
+            path += 'D';
             state = ptrD[cur];
             cj--;
+        } else {
+            // If we are here, we reached a cell without a backpointer
+            // but we haven't finished the read. This shouldn't happen 
+            // if the DP table is filled correctly.
+            break; 
         }
 
-        if (ci > read_len || cj > ref_len) {
-            return {neg_inf, ""};
-        }
-        path += (prev_state == 0 ? 'M' : prev_state == 1 ? 'I' : 'D');
+        // IMPORTANT: If we are at row 0, we have consumed the read.
+        if (ci == 0) break;
+        
+        // Safety: prevent infinite loops if cj goes out of bounds
+        if (cj > ref_len) break; 
     }
 
     std::reverse(path.begin(), path.end());

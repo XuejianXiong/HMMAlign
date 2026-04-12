@@ -17,8 +17,8 @@ struct ModelParams {
 };
 
 struct EmissionParams {
-    double match_score = 0.0;
-    double mismatch_score = -2.0;
+    double match_score = 1.0;    // Reward for matching
+    double mismatch_score = -1.0; // Penalty for mismatch
 };
 
 } // namespace hmmalign

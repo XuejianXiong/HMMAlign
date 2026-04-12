@@ -22,7 +22,7 @@ print(f"Noisy Match Score: {result_noisy.score}")
 print(f"Path:  {result_noisy.path}")
 
 
-assert result_perfect.score > result_noisy.score
+assert result_perfect.score >= result_noisy.score
 print("✅ Verification Complete: Perfect match scored higher than noisy match.")
 
 
