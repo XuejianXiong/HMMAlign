@@ -70,7 +70,7 @@ HMMAlign/
 
 - [ ] Alpha Engine: Implementation of the core 3-state (M, I, D) Viterbi matrix.
 
-- [ ] Alpha Engine: Implementation of the core 3-state (M, I, D) Viterbi matrix.
+- [ ] Backtrace Logic: Development of the traceback path to generate CIGAR strings.
 
 - [ ] Benchmarking: Comparison against standard alignment tools for accuracy and throughput.
 
