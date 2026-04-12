@@ -13,6 +13,7 @@ struct ModelParams {
     double I_to_I = -1.0;
     double D_to_M = -0.5;
     double D_to_D = -1.0;
+    int bandwidth = 500;
 };
 
 struct EmissionParams {
