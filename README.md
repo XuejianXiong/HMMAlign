@@ -3,58 +3,49 @@
 
 ## 🧠 Overview:
 
-HMMAlign is a standalone computational framework designed for high-fidelity mapping of noisy sequencing traces to genomic references. By leveraging a Hidden Markov Model (HMM) and the Viterbi algorithm, the engine resolves translocation speed variability and indel noise that purely neural-based basecallers often struggle to handle.
+HMMAlign is a high-performance computational framework designed for the precise mapping of DNA reads to genomic references. By leveraging a 3-state Hidden Markov Model (HMM) and the Viterbi algorithm, the engine effectively resolves the indel noise and translocation speed variability inherent in modern sequencing technologies.
 
- - Status: 🛠️ Architecting Core C++ Inference Engine
+ - Status: 🛠️ Architecting Core C++ Inference Engine / Bridge Verified
 
 -----------------------------------
 ## 🚀 The Mission
 
-Modern nanopore-style sensors (like Roche SBX) generate continuous electrical signals. HMMAlign provides the "algorithmic brain" to map these signals back to a known reference by:
+HMMAlign provides the "algorithmic brain" to map sequencing data back to a known reference by:
 
-1. Modeling Hidden States: Treating genomic positions as hidden states and signal posteriors (from models like SquigDecode) as emissions.
+1. Modeling Hidden States: Treating genomic positions as hidden states and basecall posteriors as emissions.
 
-2. Global Optimization: Using the Viterbi Algorithm to find the single most likely path through the reference space, effectively "stretching" or "compressing" the signal to fit the biological truth.
+2. Global Optimization: Using the Viterbi Algorithm to find the single most likely path through the reference space, effectively "stretching" or "compressing" the read to fit the biological truth.
 
-3. Probabilistic Error Correction: Automatically resolving ambiguities in high-noise regions where the local signal is unclear but the reference context is known.
+3. Probabilistic Error Correction: Automatically resolving ambiguities in high-noise regions by utilizing the known reference context to guide path selection.
 
 -----------------------------------
 ## 🏗️ Architectural Core
 
 ### 1. Signal-to-Reference Mapping
-Unlike a standard "blind" basecaller, HMMAlign is reference-aware. It utilizes a state-space model where transitions are guided by the expected k-mer transitions of a target sequence, significantly increasing consensus accuracy.
+Unlike a standard "blind" basecaller, HMMAlign is reference-aware. It utilizes a state-space model where transitions are guided by the expected genomic sequence, significantly increasing alignment sensitivity and consensus accuracy.
 
 ### 2. The Viterbi Implementation
-The core engine is being developed with a focus on low-latency primary analysis:
+The core engine is developed with a focus on low-latency primary analysis:
 
-- Log-Space Dynamic Programming: Eliminates numerical underflow and increases precision for long-read sequences.
+- Log-Space Dynamic Programming: Eliminates numerical underflow and replaces expensive multiplications with additions to increase precision and speed.
 
-- SIMD Optimization: Planned vectorization of the Viterbi matrix updates to handle high-throughput sequencing data.
+- Cache-Friendly Data Structures: Uses 1D memory layouts for DP tables to maximize CPU cache hits during matrix updates.
 
-- Memory Efficiency: Optimized traceback pointers to minimize the memory footprint during large-scale alignment tasks.
+- Cache-Friendly Data Structures: Uses 1D memory layouts for DP tables to maximize CPU cache hits during matrix updates.
 
 -----------------------------------
-## 🛠️ Planned Tech Stack
+## 🛠️ Tech Stack
 
 - Engine: Modern C++ (C++17/20) for the high-performance DP matrix.
 
-- Interface: Python bindings (via nanobind) for rapid research iteration.
+- Build System: scikit-build-core + CMake for seamless C++ compilation within Python environments.
 
-- Validation: Integrated with SquigDecode CTC posteriors as the primary emission source.
+- Environment: uv for lightning-fast, deterministic dependency management.
 
------------------------------------
-## 🗺️ Roadmap
-
-- [x] Mathematical Specification: Defined the HMM transition logic for variable translocation speeds.
-
-- [ ] Alpha Engine (In Progress): Implementation of the core Viterbi dynamic programming matrix in C++.
-
-- [ ] Reference Indexing: Development of an efficient reference-state look-up table.
-
-- [ ] Benchmarking: Comparison against standard alignment tools (e.g., BWA-MEM) for signal-level accuracy.
+- Interface: Python bindings for flexible research iteration and testing.
 
 -----------------------------------
-## 📂 Folder Structure
+## 📂 Project Structure
 
 ```
 HMMAlign/
@@ -73,9 +64,20 @@ HMMAlign/
 ```
 
 -----------------------------------
+## 🗺️ Roadmap
+
+- [x] Infrastructure: Established C++/Python bridge and build system.
+
+- [ ] Alpha Engine: Implementation of the core 3-state (M, I, D) Viterbi matrix.
+
+- [ ] Alpha Engine: Implementation of the core 3-state (M, I, D) Viterbi matrix.
+
+- [ ] Benchmarking: Comparison against standard alignment tools for accuracy and throughput.
+
+-----------------------------------
 ## 🔬 Industry Context
 
-In the development of next-generation sequencing platforms, the transition from "raw squiggle" to "mapped read" is the most critical computational bottleneck. HMMAlign demonstrates a modular approach to this problem, separating the feature extraction (Deep Learning) from the sequence logic (Classical Algorithms).
+In the development of next-generation sequencing platforms, the transition from raw data to a mapped read is a critical computational bottleneck. HMMAlign demonstrates a modular, scalable approach to this problem, separating high-speed sequence logic from upstream feature extraction.
 
 -----------------------------------
 ## 📘 License
