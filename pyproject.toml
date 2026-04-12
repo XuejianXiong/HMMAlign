@@ -1,0 +1,32 @@
+[build-system]
+requires = ["scikit-build-core>=0.10.0", "pybind11>=2.13.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "hmmalign"
+version = "0.1.0"
+description = "High-performance Viterbi-based DNA alignment engine"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    {name = "Xuejian"}
+]
+dependencies = [
+    "numpy>=2.0.0",  # Using 2.0+ for better C-API compatibility
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+]
+dev = [
+    "numba>=0.60.0", # Kept for your Python-based research/notebooks
+]
+
+[tool.scikit-build]
+cmake.version = ">=3.15"
+build-dir = "build/{wheel_tag}"
+install.components = ["python_modules"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

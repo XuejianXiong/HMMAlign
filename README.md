@@ -57,16 +57,19 @@ The core engine is being developed with a focus on low-latency primary analysis:
 ## 📂 Folder Structure
 
 ```
-├── .github/          # Workflows for CI/CD
-├── src/              # C++ Source (The Viterbi Engine)
-│   ├── viterbi.cpp
-│   └── hmm_model.hpp
-├── python/           # Python Bindings (Pybind11/Nanobind)
-│   └── hmmalign/
-├── tests/            # Unit tests for DP matrix accuracy
-├── notebooks/        # Research and visualization of paths
-├── pyproject.toml    # Modern dependency management
-└── README.md         # The technical blueprint
+HMMAlign/
+├── .venv/                # Python virtual environment (managed by uv)
+├── src/                  # C++ Source Code
+│   ├── viterbi.cpp       # Core Viterbi algorithm implementation
+│   └── hmm_model.hpp     # HMM state and transition parameters
+├── hmmalign/             # Python Package Source
+│   ├── __init__.py       # Package entry point and bridge logic
+│   └── _core*.so         # Compiled C++ binary (generated)
+├── pyproject.toml        # Project metadata and build dependencies
+├── CMakeLists.txt        # C++ build configuration
+├── uv.lock               # Deterministic dependency lockfile
+├── check_bridge.py       # Sanity check for C++/Python integration
+└── main.py               # Main application entry point
 ```
 
 -----------------------------------

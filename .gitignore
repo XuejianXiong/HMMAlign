@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+.venv/
+*.pyc
+.python-version
+.ipynb_checkpoints/
+
+# --- C++ Build & Artifacts ---
+# Ignore the temporary build directory
+build/
+
+# Ignore CMake/Ninja generated files in root
+CMakeFiles/
+CMakeCache.txt
+CMakeInit.txt
+cmake_install.cmake
+build.ninja
+.ninja_deps
+.ninja_log
+.cmake/
+.skbuild-info.json
+
+# --- Compiled Libraries ---
+# Ignore the compiled engine in the root folder
+# (We only want to keep the one inside the hmmalign/ folder)
+/_core.cpython*.so
+/_core.cpython*.pyd
+
+# --- IDE & OS ---
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Project Specific ---
+# If you create local test data or logs
+data/
+logs/
+*.log
