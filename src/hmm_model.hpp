@@ -9,23 +9,26 @@
 namespace hmmalign {
 
 struct ModelParams {
-    float M_to_M = 0.0f;
-    float M_to_I = -3.0f;
-    float M_to_D = -3.0f;
-    float I_to_M = -0.5f;
-    float I_to_I = -1.0f;
-    float D_to_M = -0.5f;
-    float D_to_D = -1.0f;
+    // Transitions (Log-space)
+    float M_to_M = 0.0f;    // Match stays Match
+    float M_to_I = -4.5f;   // Gap Open (Insertion): High penalty
+    float M_to_D = -4.5f;   // Gap Open (Deletion): High penalty
+    
+    float I_to_M = -0.6f;   // Gap Close
+    float I_to_I = -0.2f;   // Gap Extend: Low penalty (Affine)
+    
+    float D_to_M = -0.6f;   // Gap Close
+    float D_to_D = -0.2f;   // Gap Extend: Low penalty (Affine)
+    
     int bandwidth = 500;
 };
 
 struct EmissionParams {
     float match_score = 1.0f;
-    float mismatch_score = -1.0f;
+    float mismatch_score = -1.5f; // Punish mismatches more than gap extensions
 };
 
 struct AlignmentBuffer {
-    // Using float (4 bytes) instead of double (8 bytes) doubles cache efficiency
     std::vector<float> M, I, D;
     std::vector<int8_t> ptrM, ptrI, ptrD;
 
@@ -39,7 +42,6 @@ struct AlignmentBuffer {
             ptrI.assign(total, -1);
             ptrD.assign(total, -1);
         } else {
-            // Re-filling existing memory is faster than reallocating
             std::fill(M.begin(), M.begin() + total, neg_inf);
             std::fill(I.begin(), I.begin() + total, neg_inf);
             std::fill(D.begin(), D.begin() + total, neg_inf);
