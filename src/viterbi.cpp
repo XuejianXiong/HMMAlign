@@ -8,16 +8,11 @@
 namespace py = pybind11;
 using namespace hmmalign;
 
-static inline size_t index_2d(size_t i, size_t j, size_t width) {
-    return i * width + j;
-}
-
 struct AlignResult {
-    double score;
+    float score;
     std::string path;
 };
 
-// Core logic using the reused buffer
 AlignResult viterbi_align_buffered(const std::string& read, const std::string& ref, 
                                   const ModelParams& params, AlignmentBuffer& buf) {
     const EmissionParams emission;
@@ -25,90 +20,130 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
     const size_t ref_len = ref.size();
     const size_t width = ref_len + 1;
     const size_t total = (read_len + 1) * width;
-    const double neg_inf = -std::numeric_limits<double>::infinity();
-    const size_t bandwidth = params.bandwidth < 0 ? 0 : static_cast<size_t>(params.bandwidth);
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    const size_t bandwidth = static_cast<size_t>(params.bandwidth);
 
-    // Prepare buffer (only reallocates if necessary)
+    // 1. Allocate/Resize buffer (Capacity management)
     buf.reserve(total);
 
-    // --- 1. Glocal Initialization ---
+    // 2. Glocal Initialization
+    // Reset only the first row to ensure clean start
+    std::fill(buf.M.begin(), buf.M.begin() + width, neg_inf);
+    std::fill(buf.I.begin(), buf.I.begin() + width, neg_inf);
+    std::fill(buf.D.begin(), buf.D.begin() + width, neg_inf);
+    
     for (size_t j = 0; j <= ref_len; ++j) {
-        buf.M[index_2d(0, j, width)] = 0.0;
+        buf.M[j] = 0.0f; // Row 0: M can start anywhere for Glocal
     }
 
-    // --- 2. Main DP Fill ---
+    // 3. Main DP Fill with Banding and Firewalls
     for (size_t i = 1; i <= read_len; ++i) {
         const size_t j_start = (i > bandwidth ? i - bandwidth : 0);
         const size_t j_end = std::min(ref_len, i + bandwidth);
+        const char char_i = read[i - 1];
+        const size_t row_idx = i * width;
+        const size_t prev_row_idx = (i - 1) * width;
+
+        // FIREWALL: Clear the cell immediately before the band start
+        // This prevents "stale" scores from previous buffer uses from leaking in.
+        if (j_start > 0) {
+            buf.M[row_idx + j_start - 1] = neg_inf;
+            buf.I[row_idx + j_start - 1] = neg_inf;
+            buf.D[row_idx + j_start - 1] = neg_inf;
+        }
 
         for (size_t j = j_start; j <= j_end; ++j) {
-            size_t cur = index_2d(i, j, width);
+            const size_t cur = row_idx + j;
 
+            // Match State (Diagonal)
             if (j > 0) {
-                size_t diag = index_2d(i - 1, j - 1, width);
-                double emit = (read[i - 1] == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
-                double sM = buf.M[diag] + params.M_to_M;
-                double sI = buf.I[diag] + params.I_to_M;
-                double sD = buf.D[diag] + params.D_to_M;
-                double best = std::max({sM, sI, sD});
+                const size_t diag = prev_row_idx + (j - 1);
+                const float emit = (char_i == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
+                
+                const float sM = buf.M[diag] + params.M_to_M;
+                const float sI = buf.I[diag] + params.I_to_M;
+                const float sD = buf.D[diag] + params.D_to_M;
+
+                float best = sM;
+                int8_t p = 0;
+                if (sI > best) { best = sI; p = 1; }
+                if (sD > best) { best = sD; p = 2; }
+
                 if (best > neg_inf) {
                     buf.M[cur] = best + emit;
-                    if (sM >= sI && sM >= sD) buf.ptrM[cur] = 0;
-                    else if (sI >= sD)         buf.ptrM[cur] = 1;
-                    else                      buf.ptrM[cur] = 2;
+                    buf.ptrM[cur] = p;
                 }
             }
 
-            size_t up = index_2d(i - 1, j, width);
-            double sM_i = buf.M[up] + params.M_to_I;
-            double sI_i = buf.I[up] + params.I_to_I;
-            double best_i = std::max(sM_i, sI_i);
-            if (best_i > neg_inf) {
-                buf.I[cur] = best_i;
-                buf.ptrI[cur] = (sM_i >= sI_i) ? 0 : 1;
-            }
+            // Insertion (Up)
+            const size_t up = prev_row_idx + j;
+            const float sM_i = buf.M[up] + params.M_to_I;
+            const float sI_i = buf.I[up] + params.I_to_I;
+            
+            buf.I[cur] = (sM_i >= sI_i) ? sM_i : sI_i;
+            buf.ptrI[cur] = (sM_i >= sI_i) ? 0 : 1;
 
+            // Deletion (Left)
             if (j > 0) {
-                size_t left = index_2d(i, j - 1, width);
-                double sM_d = buf.M[left] + params.M_to_D;
-                double sD_d = buf.D[left] + params.D_to_D;
-                double best_d = std::max(sM_d, sD_d);
-                if (best_d > neg_inf) {
-                    buf.D[cur] = best_d;
-                    buf.ptrD[cur] = (sM_d >= sD_d) ? 0 : 2;
-                }
+                const size_t left = row_idx + (j - 1);
+                const float sM_d = buf.M[left] + params.M_to_D;
+                const float sD_d = buf.D[left] + params.D_to_D;
+                
+                buf.D[cur] = (sM_d >= sD_d) ? sM_d : sD_d;
+                buf.ptrD[cur] = (sM_d >= sD_d) ? 0 : 2;
             }
+        }
+        
+        // FIREWALL: Clear the cell immediately after the band end
+        if (j_end < ref_len) {
+            buf.M[row_idx + j_end + 1] = neg_inf;
+            buf.I[row_idx + j_end + 1] = neg_inf;
+            buf.D[row_idx + j_end + 1] = neg_inf;
         }
     }
 
-    // --- 3. Glocal Termination ---
-    double final_score = neg_inf;
+    // 4. Termination: Search only the calculated band on the last row
+    float final_score = neg_inf;
     size_t best_j = 0;
     int8_t state = -1;
 
-    for (size_t j = 0; j <= ref_len; ++j) {
-        size_t idx = index_2d(read_len, j, width);
+    const size_t i_final = read_len;
+    const size_t js = (i_final > bandwidth ? i_final - bandwidth : 0);
+    const size_t je = std::min(ref_len, i_final + bandwidth);
+
+    for (size_t j = js; j <= je; ++j) {
+        size_t idx = i_final * width + j;
         if (buf.M[idx] > final_score) { final_score = buf.M[idx]; best_j = j; state = 0; }
         if (buf.I[idx] > final_score) { final_score = buf.I[idx]; best_j = j; state = 1; }
         if (buf.D[idx] > final_score) { final_score = buf.D[idx]; best_j = j; state = 2; }
     }
     
-    if (final_score == neg_inf) return {neg_inf, ""};
+    if (final_score <= neg_inf || state == -1) return {neg_inf, ""};
 
-    // --- 4. Traceback ---
+    // 5. Traceback
     size_t ci = read_len, cj = best_j;
     std::string raw_path = "";
     while (ci > 0) {
-        size_t cur = index_2d(ci, cj, width);
-        if (state == 0) { raw_path += 'M'; state = buf.ptrM[cur]; ci--; cj--; }
-        else if (state == 1) { raw_path += 'I'; state = buf.ptrI[cur]; ci--; }
-        else if (state == 2) { raw_path += 'D'; state = buf.ptrD[cur]; cj--; }
-        else break;
-        if (ci == 0) break;
+        size_t cur = ci * width + cj;
+        if (state == 0) { // Match
+            raw_path += 'M';
+            state = buf.ptrM[cur];
+            ci--; cj--;
+        } else if (state == 1) { // Insertion
+            raw_path += 'I';
+            state = buf.ptrI[cur];
+            ci--;
+        } else if (state == 2) { // Deletion
+            raw_path += 'D';
+            state = buf.ptrD[cur];
+            cj--;
+        } else {
+            break;
+        }
     }
     std::reverse(raw_path.begin(), raw_path.end());
 
-    // --- 5. CIGAR Compression ---
+    // 6. CIGAR Compression
     if (raw_path.empty()) return {final_score, ""};
     std::string cigar = "";
     char last_op = raw_path[0];
@@ -126,7 +161,7 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
     return {final_score, cigar};
 }
 
-// Wrapper for the original function call (creates a temporary buffer)
+// Simple wrapper for non-buffered calls
 AlignResult viterbi_align(std::string read, std::string ref, ModelParams params) {
     AlignmentBuffer temp_buf;
     return viterbi_align_buffered(read, ref, params, temp_buf);
@@ -144,13 +179,11 @@ PYBIND11_MODULE(_core, m) {
         .def_readwrite("D_to_D", &ModelParams::D_to_D)
         .def_readwrite("bandwidth", &ModelParams::bandwidth);
 
-    py::class_<AlignmentBuffer>(m, "AlignmentBuffer")
-        .def(py::init<>());
-
+    py::class_<AlignmentBuffer>(m, "AlignmentBuffer").def(py::init<>());
     py::class_<AlignResult>(m, "AlignResult")
         .def_readonly("score", &AlignResult::score)
         .def_readonly("path", &AlignResult::path);
 
-    m.def("viterbi_align", &viterbi_align, "Original version (allocates each time)");
-    m.def("viterbi_align_buffered", &viterbi_align_buffered, "Fast version with buffer reuse");
+    m.def("viterbi_align_buffered", &viterbi_align_buffered);
+    m.def("viterbi_align", &viterbi_align);
 }
