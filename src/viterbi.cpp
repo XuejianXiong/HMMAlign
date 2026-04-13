@@ -18,7 +18,7 @@ struct AlignResult {
 };
 
 AlignResult viterbi_align(std::string read, std::string ref, ModelParams params) {
-    const EmissionParams emission;
+    const EmissionParams emission; // match_score = 1.0, mismatch = -1.5
     const size_t read_len = read.size();
     const size_t ref_len = ref.size();
     const size_t width = ref_len + 1;
@@ -30,8 +30,7 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
     std::vector<int8_t> ptrM(total, -1), ptrI(total, -1), ptrD(total, -1);
 
     // --- 1. Glocal Initialization ---
-    // The read can start anywhere in the reference at i=0 for free (score 0.0).
-    // This creates the "Landing Strip" for the traceback to find.
+    // Read can start anywhere in the reference (i=0) with 0.0 penalty.
     for (size_t j = 0; j <= ref_len; ++j) {
         M[index_2d(0, j, width)] = 0.0;
     }
@@ -44,7 +43,7 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
         for (size_t j = j_start; j <= j_end; ++j) {
             size_t cur = index_2d(i, j, width);
 
-            // Match State
+            // Match/Mismatch State
             if (j > 0) {
                 size_t diag = index_2d(i - 1, j - 1, width);
                 double emit = (read[i - 1] == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
@@ -56,9 +55,9 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
                 double best = std::max({sM, sI, sD});
                 if (best > neg_inf) {
                     M[cur] = best + emit;
-                    if (sM >= sI && sM >= sD)      ptrM[cur] = 0;
-                    else if (sI >= sD)            ptrM[cur] = 1;
-                    else                          ptrM[cur] = 2;
+                    if (sM >= sI && sM >= sD) ptrM[cur] = 0;
+                    else if (sI >= sD)         ptrM[cur] = 1;
+                    else                      ptrM[cur] = 2;
                 }
             }
 
@@ -86,10 +85,10 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
         }
     }
 
-    // --- 3. Find Best Terminal Score (Glocal: Scan the entire last row) ---
+    // --- 3. Glocal Termination: Find best score on last row ---
     double final_score = neg_inf;
     size_t best_j = 0;
-    int8_t state = -1; // 0:M, 1:I, 2:D
+    int8_t state = -1;
 
     for (size_t j = 0; j <= ref_len; ++j) {
         size_t idx = index_2d(read_len, j, width);
@@ -102,41 +101,49 @@ AlignResult viterbi_align(std::string read, std::string ref, ModelParams params)
 
     // --- 4. Traceback ---
     size_t ci = read_len, cj = best_j;
-    std::string path = "";
-    path.reserve(read_len * 2);
-
+    std::string raw_path = "";
+    
     while (ci > 0) {
         size_t cur = index_2d(ci, cj, width);
         int8_t current_state = state;
 
-        if (current_state == 0) { // Match
-            path += 'M';
+        if (state == 0) { // Match
+            raw_path += 'M';
             state = ptrM[cur];
             ci--; cj--;
-        } else if (current_state == 1) { // Insertion
-            path += 'I';
+        } else if (state == 1) { // Insertion
+            raw_path += 'I';
             state = ptrI[cur];
             ci--;
-        } else if (current_state == 2) { // Deletion
-            path += 'D';
+        } else if (state == 2) { // Deletion
+            raw_path += 'D';
             state = ptrD[cur];
             cj--;
         } else {
-            // If we are here, we reached a cell without a backpointer
-            // but we haven't finished the read. This shouldn't happen 
-            // if the DP table is filled correctly.
-            break; 
+            break;
         }
-
-        // IMPORTANT: If we are at row 0, we have consumed the read.
         if (ci == 0) break;
-        
-        // Safety: prevent infinite loops if cj goes out of bounds
-        if (cj > ref_len) break; 
     }
+    std::reverse(raw_path.begin(), raw_path.end());
 
-    std::reverse(path.begin(), path.end());
-    return {final_score, path};
+    // --- 5. CIGAR Compression ---
+    if (raw_path.empty()) return {final_score, ""};
+    
+    std::string cigar = "";
+    char last_op = raw_path[0];
+    int count = 0;
+    for (char op : raw_path) {
+        if (op == last_op) {
+            count++;
+        } else {
+            cigar += std::to_string(count) + last_op;
+            last_op = op;
+            count = 1;
+        }
+    }
+    cigar += std::to_string(count) + last_op;
+
+    return {final_score, cigar};
 }
 
 PYBIND11_MODULE(_core, m) {
@@ -155,6 +162,6 @@ PYBIND11_MODULE(_core, m) {
         .def_readonly("score", &AlignResult::score)
         .def_readonly("path", &AlignResult::path);
 
-    m.def("viterbi_align", &viterbi_align, "Compute score and path",
+    m.def("viterbi_align", &viterbi_align, "Compute score and CIGAR path",
           py::arg("read"), py::arg("ref"), py::arg("params"));
 }

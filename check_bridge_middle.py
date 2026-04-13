@@ -4,59 +4,51 @@ import time
 def test_glocal_middle():
     params = core.ModelParams()
     
-    # --- 1. Set Parameters with Positive Reinforcement ---
-    # We need match_score to be a reward (e.g., 1.0) so the algorithm 
-    # prefers a long 996bp path over a short 1bp path.
-    # Note: Ensure your C++ EmissionParams reflect these rewards/penalties.
-    params.M_to_M = 0.0    # Log(1.0) - stay in match
-    params.M_to_I = -2.0   # Penalty to start gap
-    params.I_to_I = -0.5   # Penalty to extend gap
-    params.M_to_D = -2.0   # Penalty to start gap
-    params.D_to_D = -0.5   # Penalty to extend gap
-    params.I_to_M = -0.1   
+    # --- 1. Parameters ---
+    # Log-probs: Ensure match reward exists in C++ EmissionParams
+    params.M_to_M = 0.0
+    params.M_to_I = -2.0
+    params.I_to_I = -0.5
+    params.M_to_D = -2.0
+    params.D_to_D = -0.5
+    params.I_to_M = -0.1
     params.D_to_M = -0.1
-    params.bandwidth = 500 # Wide enough to find the 100bp offset
 
-    # --- 2. Create Sequences ---
-    # Reference is 1200bp
-    ref = "ACGT" * 300 
-    
-    # Read is 996bp, matches ref starting at index 100
-    # This means read[0] aligns to ref[100]
-    read = ref[100 : 100 + 996]
+    # --- 2. Sequence Creation ---
+    ref = "ACGT" * 300  # 1200bp
+    read = ref[100 : 100 + 996] # 996bp matching middle
     
     print(f"Aligning Read ({len(read)} bp) to Reference ({len(ref)} bp)")
     print("Scenario: Read matches the MIDDLE (starting at index 100).")
     print("-" * 40)
 
-    # --- 3. Run Wide Band Test ---
+    # --- 3. Wide Band Test ---
     params.bandwidth = 500
     start_time = time.time()
     res_wide = core.viterbi_align(read, ref, params)
     duration = time.time() - start_time
     
     print(f"Wide Band (500)   | Score: {res_wide.score:>8.2f} | Time: {duration:.5f}s")
-    print(f"Path Length: {len(res_wide.path)}")
+    print(f"CIGAR Output: {res_wide.path}")
 
-    # --- 4. Run Narrow Band Test ---
-    # Must be > 100 to account for the offset between read[0] and ref[100]
-    params.bandwidth = 150 
+    # --- 4. Narrow Band Test ---
+    params.bandwidth = 200 
     res_narrow = core.viterbi_align(read, ref, params)
-    print(f"Narrow Band (150) | Score: {res_narrow.score:>8.2f}")
-    print(f"Path Length: {len(res_narrow.path)}")
+    print(f"Narrow Band (200) | Score: {res_narrow.score:>8.2f}")
+    print(f"CIGAR Output: {res_narrow.path}")
 
     # --- 5. Verification ---
-    # If match_score is 1.0, a 996bp perfect match should score 996.0
-    # If your match_score is still 0.0, the length is the only way to verify success.
-    if len(res_wide.path) == 996:
-        print("\n✅ Success! Glocal identified the full middle match.")
-        print(f"Path matches: {res_wide.path == res_narrow.path}")
-        print(f"Path snippet (first 10): {res_wide.path[:10]}...")
+    # In CIGAR format, a perfect 996bp match is the string "996M"
+    expected_cigar = f"{len(read)}M"
+    
+    if res_wide.path == expected_cigar:
+        print(f"\n✅ Success! Glocal identified the full match.")
+        print(f"Bands match: {res_wide.path == res_narrow.path}")
+        print(f"Final CIGAR: {res_wide.path}")
     else:
-        print("\n❌ Failure: Alignment was truncated.")
-        print(f"Expected Length: 996 | Actual Length: {len(res_wide.path)}")
-        print(f"Score: {res_wide.score}")
-        print("Hint: Ensure match_score in C++ is a positive reward (e.g., 1.0).")
+        print("\n❌ Failure: CIGAR does not match expectation.")
+        print(f"Expected: {expected_cigar} | Actual: {res_wide.path}")
+        print(f"Path string length: {len(res_wide.path)} (This is the char count of the CIGAR string)")
 
 if __name__ == "__main__":
     test_glocal_middle()
