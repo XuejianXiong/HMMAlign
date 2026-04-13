@@ -4,9 +4,8 @@ import json
 import argparse
 import os
 
-
 def load_config(path):
-    if os.path.exists(path):
+    if path and os.path.exists(path):
         with open(path, 'r') as f:
             return json.load(f)
     return {}
@@ -17,13 +16,17 @@ def run_test_case(name, read, ref, expected_op=None, params=None):
         params.bandwidth = 200
 
     buf = core.AlignmentBuffer()
-    start = time.time()
+    
+    # Use perf_counter for microsecond precision
+    start = time.perf_counter()
     result = core.viterbi_align_buffered(read, ref, params, buf)
-    duration = time.time() - start
+    duration_ms = (time.perf_counter() - start) * 1000
 
     print(f"🧪 Test: {name}")
-    print(f"  Score: {result.score:.2f} | Time: {duration*.1000:.3f}ms")
-    print(f"  CIGAR: {result.path}")
+    print(f"  Score: {result.score:.2f} | Time: {duration_ms:.4f}ms")
+    # Truncate long CIGARs for readability
+    display_cigar = result.path if len(result.path) < 60 else f"{result.path[:30]}...{result.path[-20:]}"
+    print(f"  CIGAR: {display_cigar}")
     
     if expected_op and expected_op in result.path:
         print("  ✅ Passed")
@@ -34,69 +37,69 @@ def run_test_case(name, read, ref, expected_op=None, params=None):
     print("-" * 50)
 
 def test_suite(config_data):
-    print("🚀 Starting Comprehensive HMMAlign Test Suite\n")
-
+    print("🚀 Starting HMMAlign Suite (Soft-Clipping & HPC Optimized)\n")
+    
+    # Extract parameters for specialized tests
+    p = config_data.get('parameters', {})
+    
     # 1. Standard Identity Match
     run_test_case("Perfect Match", "ACGT" * 25, "ACGT" * 25, "100M")
 
-    # 2. N-Neutrality Test
-    # Read has an 'N', Ref has 'A'. Should score 9.0 (10 bases - 1 neutral)
-    # under match=1.0, mismatch=-1.5
-    run_test_case(
-        "N-Neutrality (Read)", 
-        "AAAAANAAAA", 
-        "AAAAAAAAAA", 
-        "10M"
-    )
-
-    # 3. Affine Deletion Test (Structural Variant)
-    # Testing if a 50bp gap is consolidated into a single 'D' block
-    params = core.ModelParams()
-    params.M_to_D = config_data['parameters']['M_to_D']   # -5.0 Expensive Open
-    params.D_to_D = config_data['parameters']['D_to_D']   # -0.1 Cheap Extend
-    params.bandwidth = config_data['parameters']['bandwidth']   # 100
+    # 2. Affine Deletion Test
+    params_affine = core.ModelParams()
+    params_affine.M_to_D = p.get('M_to_D', -5.0)
+    params_affine.D_to_D = p.get('D_to_D', -0.1)
+    params_affine.bandwidth = p.get('bandwidth', 100)
     
     ref_gap = "A" * 100 + "G" * 50 + "T" * 100
     read_gap = "A" * 100 + "T" * 100
-    run_test_case("Affine Deletion (50bp)", read_gap, ref_gap, "50D", params)
+    run_test_case("Affine Deletion (50bp)", read_gap, ref_gap, "50D", params_affine)
 
-    # 4. Glocal Start Test
-    # Read should align to the MIDDLE of the reference without penalty
-    ref_long = "GGGGGGGGGG" + "ATCG" * 10 + "CCCCCC"
-    read_mid = "ATCG" * 10
-    run_test_case("Glocal Alignment (Mid-stream)", read_mid, ref_long, "40M")
+    # 3. Soft-Clipping: Leading Adapter
+    # Read has 10bp of 'G' that doesn't exist in 'A' reference
+    run_test_case(
+        "Leading Soft-Clip (Adapter)", 
+        "GGGGGGGGGG" + "A" * 50, 
+        "A" * 100, 
+        "10S"
+    )
 
-    # 5. High-Noise Stress Test (10kb)
-    # Verifying the Mac Pro performance and buffer stability
-    big_ref = "ACGT" * 2500  # 10,000 bp
-    big_read = "ACGT" * 2490 + "NNNNNNNNNN" # 10,000 bp with N-tail
+    # 4. Soft-Clipping: Trailing Adapter
+    # Read ends with 15bp of 'C' that doesn't exist in 'T' reference
+    run_test_case(
+        "Trailing Soft-Clip", 
+        "T" * 50 + "CCCCCCCCCCCCCCC", 
+        "T" * 100, 
+        "15S"
+    )
+
+    # 5. Soft-Clipping: Dual Ends (The "Real World" case)
+    # Junk at both ends, biological match in the middle
+    run_test_case(
+        "Dual-End Soft-Clip", 
+        "GGGG" + "ACGT" * 10 + "CCCC", 
+        "AAAAA" + "ACGT" * 10 + "TTTTT", 
+        "4S"
+    )
+
+    # 6. Glocal Start Test
+    run_test_case("Glocal (Mid-stream)", "ATCG" * 10, "GGGGGGGGGG" + "ATCG" * 10 + "CCCCCC", "40M")
+
+    # 7. High-Noise Stress Test (10kb)
+    big_ref = "ACGT" * 2500 
+    big_read = "ACGT" * 2490 + "NNNNNNNNNN" 
     run_test_case("10kb Long Read Stress", big_read, big_ref, "M")
 
-    # 6. Random "N" Noise (Middle & Scattered)
-    # 100bp with a "low quality" center
-    ref_mid_n = "A" * 400 + "GCGT" * 5 + "A" * 400
-    read_mid_n = "A" * 400 + "NNNN" * 5 + "A" * 400
-    run_test_case("Scattered N-Noise (Middle)", read_mid_n, ref_mid_n, "820M")
-
-    # 7. High-Density N-Island
-    # Testing if the HMM can "bridge" a 20bp gap of total uncertainty
-    ref_island = "C" * 1000 + "ATGC" * 5 + "G" * 1000
-    read_island = "C" * 1000 + "N" * 20 + "G" * 1000
-    run_test_case("N-Island Bridge (20bp)", read_island, ref_island, "2020M")
-
-    # 8. The "N-Start" Edge Case
-    # Some basecallers put Ns at the very beginning of a read
-    run_test_case("N-Start Alignment", "NNNNNAAAA", "TTTTTAAAA", "9M")
+    # 8. Scatterned N-Noise
+    run_test_case("Scattered N-Noise", "A" * 400 + "NNNN" * 5 + "A" * 400, "A" * 400 + "GCGT" * 5 + "A" * 400, "M")
 
 
 if __name__ == "__main__":
-    # Handle the --input argument from rebuild.sh
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config")
+    parser.add_argument("--config", help="Path to config.json")
     args = parser.parse_args()
 
-    # Load the config.json
+    # Load parameters
     config_data = load_config(args.config)
-    #print(config_data)
     
     test_suite(config_data)

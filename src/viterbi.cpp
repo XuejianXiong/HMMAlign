@@ -9,59 +9,50 @@
 namespace py = pybind11;
 using namespace hmmalign;
 
-/**
- * @brief Result structure for Python binding
- */
 struct AlignResult {
     float score;
     std::string path;
 };
 
 /**
- * @brief Performs a Glocal Viterbi Alignment with Affine Gap Penalties and Banding.
- * * This implementation uses a pre-allocated buffer to minimize heap churn and
- * incorporates "Firewalls" (boundary sanitization) to allow safe buffer reuse.
+ * @brief Performs a Viterbi Alignment with true Soft-Clipping and Banding.
+ * Includes a Local-Entry reset to handle leading/trailing adapter noise.
  */
 AlignResult viterbi_align_buffered(const std::string& read, const std::string& ref, 
                                   const ModelParams& params, AlignmentBuffer& buf) {
     
-    std::cout << "DEBUG C++: Bandwidth received = " << params.bandwidth << std::endl;
     const EmissionParams emission;
     const size_t read_len = read.size();
     const size_t ref_len = ref.size();
     const size_t width = ref_len + 1;
     const size_t total = (read_len + 1) * width;
     const float neg_inf = -std::numeric_limits<float>::infinity();
-    // const size_t bandwidth = static_cast<size_t>(params.bandwidth);
-    const size_t bandwidth = 200; // FORCED HARD-CODE
+    const size_t bandwidth = static_cast<size_t>(params.bandwidth);
 
-    // 1. Memory Management: Ensure buffer is large enough for current read/ref pair
     buf.reserve(total);
 
-    // 2. Initialization: Set up Row 0 for Glocal alignment
-    // M[0][j] = 0 allows the alignment to start at any position in the reference without penalty.
+    // 1. Initialization: Row 0 (Free start in reference)
     for (size_t j = 0; j <= ref_len; ++j) {
         buf.M[j] = 0.0f; 
         buf.I[j] = neg_inf;
         buf.D[j] = neg_inf;
     }
 
-    // 3. Main Dynamic Programming Loop
+    // 2. Main DP Loop
     for (size_t i = 1; i <= read_len; ++i) {
         const size_t row_idx = i * width;
         const size_t prev_row_idx = (i - 1) * width;
         const char char_i = read[i - 1];
 
-        // Column 0 Sanitization: Prevents alignment from starting mid-read at ref index 0
-        buf.M[row_idx] = neg_inf;
+        // Column 0: Free start in read for soft-clipping
+        buf.M[row_idx] = 0.0f; 
         buf.I[row_idx] = neg_inf; 
         buf.D[row_idx] = neg_inf;
 
-        // Determine Banding Bounds: O(N * Bandwidth) complexity
         const size_t j_start = (i > bandwidth ? i - bandwidth : 1);
         const size_t j_end = std::min(ref_len, i + bandwidth);
 
-        // LEFT FIREWALL: Explicitly kill stale data from previous buffer usage
+        // LEFT FIREWALL
         if (j_start > 0) {
             buf.M[row_idx + j_start - 1] = neg_inf;
             buf.I[row_idx + j_start - 1] = neg_inf;
@@ -72,54 +63,46 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
             const size_t cur = row_idx + j;
             const char char_j = ref[j - 1];
 
-            // --- Match State Transition ---
+            // --- Match State with Local Entry Reset ---
             const size_t diag = prev_row_idx + (j - 1);
+            float emit = (char_i == 'N' || char_j == 'N') ? 0.0f : 
+                         (char_i == char_j ? emission.match_score : emission.mismatch_score);
             
-            // N-Neutrality: Ambiguous bases provide 0 reward/penalty to preserve path sensitivity
-            float emit;
-            if (char_i == 'N' || char_j == 'N') {
-                emit = 0.0f;
-            } else {
-                emit = (char_i == char_j) ? emission.match_score : emission.mismatch_score;
-            }
+            float sM = buf.M[diag] + params.M_to_M;
+            float sI = buf.I[diag] + params.I_to_M;
+            float sD = buf.D[diag] + params.D_to_M;
+
+            // Determine if starting fresh (0.0) is better than continuing path
+            float best_m = std::max({sM, sI, sD, 0.0f}); 
             
-            const float sM = buf.M[diag] + params.M_to_M;
-            const float sI = buf.I[diag] + params.I_to_M;
-            const float sD = buf.D[diag] + params.D_to_M;
-
-            float best_m = sM; int8_t p_m = 0;
-            if (sI > best_m) { best_m = sI; p_m = 1; }
-            if (sD > best_m) { best_m = sD; p_m = 2; }
-
-            if (best_m > neg_inf) {
-                buf.M[cur] = best_m + emit;
-                buf.ptrM[cur] = p_m;
+            int8_t p_m = 0; 
+            if (best_m <= 0.0f) {
+                best_m = 0.0f; p_m = 3; // Source 3: New Alignment Boundary
+            } else if (best_m == sI) {
+                p_m = 1;
+            } else if (best_m == sD) {
+                p_m = 2;
             }
 
-            // --- Insertion State (Gap in Reference) ---
+            buf.M[cur] = best_m + emit;
+            buf.ptrM[cur] = p_m;
+
+            // --- Insertion State ---
             const size_t up = prev_row_idx + j;
-            const float open_i = buf.M[up] + params.M_to_I;
-            const float extend_i = buf.I[up] + params.I_to_I;
-            
-            if (open_i >= extend_i) {
-                buf.I[cur] = open_i; buf.ptrI[cur] = 0; // From Match (Gap Open)
-            } else {
-                buf.I[cur] = extend_i; buf.ptrI[cur] = 1; // From Insertion (Gap Extend)
-            }
+            float open_i = buf.M[up] + params.M_to_I;
+            float extend_i = buf.I[up] + params.I_to_I;
+            if (open_i >= extend_i) { buf.I[cur] = open_i; buf.ptrI[cur] = 0; }
+            else { buf.I[cur] = extend_i; buf.ptrI[cur] = 1; }
 
-            // --- Deletion State (Gap in Read) ---
+            // --- Deletion State ---
             const size_t left = row_idx + (j - 1);
-            const float open_d = buf.M[left] + params.M_to_D;
-            const float extend_d = buf.D[left] + params.D_to_D;
-            
-            if (open_d >= extend_d) {
-                buf.D[cur] = open_d; buf.ptrD[cur] = 0; // From Match (Gap Open)
-            } else {
-                buf.D[cur] = extend_d; buf.ptrD[cur] = 2; // From Deletion (Gap Extend)
-            }
+            float open_d = buf.M[left] + params.M_to_D;
+            float extend_d = buf.D[left] + params.D_to_D;
+            if (open_d >= extend_d) { buf.D[cur] = open_d; buf.ptrD[cur] = 0; }
+            else { buf.D[cur] = extend_d; buf.ptrD[cur] = 2; }
         }
         
-        // RIGHT FIREWALL: Ensure the band doesn't bleed into stale memory
+        // RIGHT FIREWALL
         if (j_end < ref_len) {
             buf.M[row_idx + j_end + 1] = neg_inf;
             buf.I[row_idx + j_end + 1] = neg_inf;
@@ -127,37 +110,58 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
         }
     }
 
-    // 4. Termination: Find the best score in the final row's valid band
+    // 3. Termination: Search for global max (Free-exit)
     float final_score = neg_inf;
-    size_t best_j = 0;
+    size_t best_i = 0, best_j = 0;
     int8_t state = -1;
-    const size_t i_f = read_len;
-    const size_t js = (i_f > bandwidth ? i_f - bandwidth : 0);
-    const size_t je = std::min(ref_len, i_f + bandwidth);
 
-    for (size_t j = js; j <= je; ++j) {
-        size_t idx = i_f * width + j;
-        if (buf.M[idx] > final_score) { final_score = buf.M[idx]; best_j = j; state = 0; }
-        if (buf.I[idx] > final_score) { final_score = buf.I[idx]; best_j = j; state = 1; }
-        if (buf.D[idx] > final_score) { final_score = buf.D[idx]; best_j = j; state = 2; }
+    for (size_t i = 0; i <= read_len; ++i) {
+        const size_t row_idx = i * width;
+        const size_t js = (i > bandwidth ? i - bandwidth : 0);
+        const size_t je = std::min(ref_len, i + bandwidth);
+        for (size_t j = js; j <= je; ++j) {
+            size_t idx = row_idx + j;
+            if (buf.M[idx] > final_score) { 
+                final_score = buf.M[idx]; 
+                best_i = i; 
+                best_j = j; 
+                state = 0; 
+            }
+        }
     }
     
-    if (final_score <= neg_inf || state == -1) return {neg_inf, ""};
+    if (state == -1) return {neg_inf, ""};
 
-    // 5. Traceback: Reconstruct path from end to start
-    size_t ci = read_len, cj = best_j;
+    // 4. Traceback
+    size_t ci = best_i, cj = best_j;
     std::string raw_path = "";
-    while (ci > 0 || (ci == 0 && state == 2)) {
+
+    // Suffix Soft-Clipping
+    if (best_i < read_len) {
+        for (size_t k = 0; k < (read_len - best_i); ++k) raw_path += 'S';
+    }
+
+    while (ci > 0 && cj > 0) {
         size_t cur = ci * width + cj;
-        if (state == 0) { raw_path += 'M'; state = buf.ptrM[cur]; ci--; cj--; }
+        if (state == 0) {
+            int8_t next_state = buf.ptrM[cur];
+            raw_path += 'M';
+            ci--; cj--; // Consume the match
+            if (next_state == 3) break; // Alignment start boundary reached
+            state = next_state;
+        }
         else if (state == 1) { raw_path += 'I'; state = buf.ptrI[cur]; ci--; }
         else if (state == 2) { raw_path += 'D'; state = buf.ptrD[cur]; cj--; }
-        else break;
-        if (ci == 0 && state != 2) break; // Terminate if row 0 reached (unless deleting)
     }
+
+    // Prefix Soft-Clipping (remaining read bases)
+    if (ci > 0) {
+        for (size_t k = 0; k < ci; ++k) raw_path += 'S';
+    }
+
     std::reverse(raw_path.begin(), raw_path.end());
 
-    // 6. CIGAR Compression: Convert raw path (MMMDMM) to CIGAR (3M1D2M)
+    // 5. CIGAR Compression
     if (raw_path.empty()) return {final_score, ""};
     std::string cigar = "";
     char last_op = raw_path[0];
@@ -174,17 +178,13 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
     return {final_score, cigar};
 }
 
-/**
- * @brief Python-friendly wrapper for non-buffered alignment calls
- */
+/** Python Wrapper **/
 AlignResult viterbi_align(std::string read, std::string ref, ModelParams params) {
     AlignmentBuffer temp_buf;
     return viterbi_align_buffered(read, ref, params, temp_buf);
 }
 
-/**
- * @brief Pybind11 Module Definition
- */
+/** Pybind11 Module **/
 PYBIND11_MODULE(_core, m) {
     py::class_<ModelParams>(m, "ModelParams")
         .def(py::init<>())
@@ -202,6 +202,6 @@ PYBIND11_MODULE(_core, m) {
         .def_readonly("score", &AlignResult::score)
         .def_readonly("path", &AlignResult::path);
 
-    m.def("viterbi_align_buffered", &viterbi_align_buffered, "Buffered Viterbi alignment");
-    m.def("viterbi_align", &viterbi_align, "Standard Viterbi alignment");
+    m.def("viterbi_align_buffered", &viterbi_align_buffered);
+    m.def("viterbi_align", &viterbi_align);
 }

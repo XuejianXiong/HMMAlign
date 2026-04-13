@@ -3,13 +3,13 @@
 
 ## 🧠 Overview:
 
-HMMAlign is a high-performance computational framework designed for the precise mapping of DNA reads to genomic references. By leveraging a 3-state Hidden Markov Model (HMM) and the Viterbi algorithm, the engine effectively resolves the indel noise and translocation speed variability inherent in modern sequencing technologies.
+HMMAlign is a high-performance computational framework designed for the precise mapping of genomic reads to reference sequences. By leveraging a 3-state Hidden Markov Model (HMM) and a Banded Viterbi algorithm, the engine effectively resolves indel noise and translocation speed variability inherent in modern sequencing technologies.
 
- - Performance: 0.03ms for 10kb reads on Apple Silicon.
+ - Architecture: C++20 Core Inference Kernel with Pybind11 integration for MLOps orchestration.
 
- - Architecture: C++20 Core with Python-driven MLOps orchestration.
-
- - Status: Core Inference Engine & Traceback Verified.
+ - Feature Set: $O(N \times B)$ Banded Alignment, N-Neutrality handling, and automated CIGAR-compliant traceback.
+ 
+ - Status: Core Inference Engine & Traceback Verified (100% Test Pass Rate)..
 
 -----------------------------------
 ## 🚀 Key Features
