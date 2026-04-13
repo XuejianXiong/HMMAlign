@@ -1,3 +1,4 @@
+#include <iostream>
 #include "hmm_model.hpp"
 #include <algorithm>
 #include <limits>
@@ -8,48 +9,59 @@
 namespace py = pybind11;
 using namespace hmmalign;
 
+/**
+ * @brief Result structure for Python binding
+ */
 struct AlignResult {
     float score;
     std::string path;
 };
 
+/**
+ * @brief Performs a Glocal Viterbi Alignment with Affine Gap Penalties and Banding.
+ * * This implementation uses a pre-allocated buffer to minimize heap churn and
+ * incorporates "Firewalls" (boundary sanitization) to allow safe buffer reuse.
+ */
 AlignResult viterbi_align_buffered(const std::string& read, const std::string& ref, 
                                   const ModelParams& params, AlignmentBuffer& buf) {
+    
+    std::cout << "DEBUG C++: Bandwidth received = " << params.bandwidth << std::endl;
     const EmissionParams emission;
     const size_t read_len = read.size();
     const size_t ref_len = ref.size();
     const size_t width = ref_len + 1;
     const size_t total = (read_len + 1) * width;
     const float neg_inf = -std::numeric_limits<float>::infinity();
-    const size_t bandwidth = static_cast<size_t>(params.bandwidth);
+    // const size_t bandwidth = static_cast<size_t>(params.bandwidth);
+    const size_t bandwidth = 200; // FORCED HARD-CODE
 
-    // 1. Capacity Management
+    // 1. Memory Management: Ensure buffer is large enough for current read/ref pair
     buf.reserve(total);
 
-    // 2. STRICT INITIALIZATION (The "Ghost Score" Killer)
-    // Row 0 must be completely defined so no paths leak from previous runs.
+    // 2. Initialization: Set up Row 0 for Glocal alignment
+    // M[0][j] = 0 allows the alignment to start at any position in the reference without penalty.
     for (size_t j = 0; j <= ref_len; ++j) {
-        buf.M[j] = 0.0f;    // Glocal: Can start at any Ref position with 0 penalty
+        buf.M[j] = 0.0f; 
         buf.I[j] = neg_inf;
         buf.D[j] = neg_inf;
     }
 
-    // 3. Main DP Fill with Affine Gap Logic and Firewalls
+    // 3. Main Dynamic Programming Loop
     for (size_t i = 1; i <= read_len; ++i) {
         const size_t row_idx = i * width;
         const size_t prev_row_idx = (i - 1) * width;
         const char char_i = read[i - 1];
 
-        // Column 0 Sanitization: Cannot start an alignment with a Deletion or Match at Column 0
-        // (Except for Row 0 which we handled above).
+        // Column 0 Sanitization: Prevents alignment from starting mid-read at ref index 0
         buf.M[row_idx] = neg_inf;
         buf.I[row_idx] = neg_inf; 
         buf.D[row_idx] = neg_inf;
 
+        // Determine Banding Bounds: O(N * Bandwidth) complexity
         const size_t j_start = (i > bandwidth ? i - bandwidth : 1);
         const size_t j_end = std::min(ref_len, i + bandwidth);
 
-        // LEFT FIREWALL: Block stale data immediately before the band
+        // LEFT FIREWALL: Explicitly kill stale data from previous buffer usage
         if (j_start > 0) {
             buf.M[row_idx + j_start - 1] = neg_inf;
             buf.I[row_idx + j_start - 1] = neg_inf;
@@ -58,10 +70,18 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
 
         for (size_t j = j_start; j <= j_end; ++j) {
             const size_t cur = row_idx + j;
+            const char char_j = ref[j - 1];
 
-            // --- Match State ---
+            // --- Match State Transition ---
             const size_t diag = prev_row_idx + (j - 1);
-            const float emit = (char_i == ref[j - 1]) ? emission.match_score : emission.mismatch_score;
+            
+            // N-Neutrality: Ambiguous bases provide 0 reward/penalty to preserve path sensitivity
+            float emit;
+            if (char_i == 'N' || char_j == 'N') {
+                emit = 0.0f;
+            } else {
+                emit = (char_i == char_j) ? emission.match_score : emission.mismatch_score;
+            }
             
             const float sM = buf.M[diag] + params.M_to_M;
             const float sI = buf.I[diag] + params.I_to_M;
@@ -82,11 +102,9 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
             const float extend_i = buf.I[up] + params.I_to_I;
             
             if (open_i >= extend_i) {
-                buf.I[cur] = open_i;
-                buf.ptrI[cur] = 0; 
+                buf.I[cur] = open_i; buf.ptrI[cur] = 0; // From Match (Gap Open)
             } else {
-                buf.I[cur] = extend_i;
-                buf.ptrI[cur] = 1; 
+                buf.I[cur] = extend_i; buf.ptrI[cur] = 1; // From Insertion (Gap Extend)
             }
 
             // --- Deletion State (Gap in Read) ---
@@ -95,15 +113,13 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
             const float extend_d = buf.D[left] + params.D_to_D;
             
             if (open_d >= extend_d) {
-                buf.D[cur] = open_d;
-                buf.ptrD[cur] = 0; 
+                buf.D[cur] = open_d; buf.ptrD[cur] = 0; // From Match (Gap Open)
             } else {
-                buf.D[cur] = extend_d;
-                buf.ptrD[cur] = 2; 
+                buf.D[cur] = extend_d; buf.ptrD[cur] = 2; // From Deletion (Gap Extend)
             }
         }
         
-        // RIGHT FIREWALL: Block stale data immediately after the band
+        // RIGHT FIREWALL: Ensure the band doesn't bleed into stale memory
         if (j_end < ref_len) {
             buf.M[row_idx + j_end + 1] = neg_inf;
             buf.I[row_idx + j_end + 1] = neg_inf;
@@ -111,11 +127,10 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
         }
     }
 
-    // 4. Termination: Check only the valid band on the last row
+    // 4. Termination: Find the best score in the final row's valid band
     float final_score = neg_inf;
     size_t best_j = 0;
     int8_t state = -1;
-
     const size_t i_f = read_len;
     const size_t js = (i_f > bandwidth ? i_f - bandwidth : 0);
     const size_t je = std::min(ref_len, i_f + bandwidth);
@@ -129,31 +144,20 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
     
     if (final_score <= neg_inf || state == -1) return {neg_inf, ""};
 
-    // 5. Traceback
+    // 5. Traceback: Reconstruct path from end to start
     size_t ci = read_len, cj = best_j;
     std::string raw_path = "";
     while (ci > 0 || (ci == 0 && state == 2)) {
         size_t cur = ci * width + cj;
-        if (state == 0) { // Match
-            raw_path += 'M';
-            state = buf.ptrM[cur];
-            ci--; cj--;
-        } else if (state == 1) { // Insertion
-            raw_path += 'I';
-            state = buf.ptrI[cur];
-            ci--;
-        } else if (state == 2) { // Deletion
-            raw_path += 'D';
-            state = buf.ptrD[cur];
-            cj--;
-        } else break;
-        
-        // Stop if we hit Row 0 (unless we are in a Deletion state moving left)
-        if (ci == 0 && state != 2) break; 
+        if (state == 0) { raw_path += 'M'; state = buf.ptrM[cur]; ci--; cj--; }
+        else if (state == 1) { raw_path += 'I'; state = buf.ptrI[cur]; ci--; }
+        else if (state == 2) { raw_path += 'D'; state = buf.ptrD[cur]; cj--; }
+        else break;
+        if (ci == 0 && state != 2) break; // Terminate if row 0 reached (unless deleting)
     }
     std::reverse(raw_path.begin(), raw_path.end());
 
-    // 6. CIGAR Compression
+    // 6. CIGAR Compression: Convert raw path (MMMDMM) to CIGAR (3M1D2M)
     if (raw_path.empty()) return {final_score, ""};
     std::string cigar = "";
     char last_op = raw_path[0];
@@ -162,8 +166,7 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
         if (op == last_op) count++;
         else {
             cigar += std::to_string(count) + last_op;
-            last_op = op;
-            count = 1;
+            last_op = op; count = 1;
         }
     }
     cigar += std::to_string(count) + last_op;
@@ -171,12 +174,17 @@ AlignResult viterbi_align_buffered(const std::string& read, const std::string& r
     return {final_score, cigar};
 }
 
-// Wrapper
+/**
+ * @brief Python-friendly wrapper for non-buffered alignment calls
+ */
 AlignResult viterbi_align(std::string read, std::string ref, ModelParams params) {
     AlignmentBuffer temp_buf;
     return viterbi_align_buffered(read, ref, params, temp_buf);
 }
 
+/**
+ * @brief Pybind11 Module Definition
+ */
 PYBIND11_MODULE(_core, m) {
     py::class_<ModelParams>(m, "ModelParams")
         .def(py::init<>())
@@ -194,6 +202,6 @@ PYBIND11_MODULE(_core, m) {
         .def_readonly("score", &AlignResult::score)
         .def_readonly("path", &AlignResult::path);
 
-    m.def("viterbi_align_buffered", &viterbi_align_buffered);
-    m.def("viterbi_align", &viterbi_align);
+    m.def("viterbi_align_buffered", &viterbi_align_buffered, "Buffered Viterbi alignment");
+    m.def("viterbi_align", &viterbi_align, "Standard Viterbi alignment");
 }

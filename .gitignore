@@ -36,6 +36,4 @@ Thumbs.db
 data/
 logs/
 *.log
-check_*.py
-test*.py
-*_v1.py
+bk/

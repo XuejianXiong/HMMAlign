@@ -1,0 +1,8 @@
+{
+    "execution": {
+        "rebuild_cpp": false,
+        "python_script": "main.py",
+        "input_file": "sample_data.fastq",
+        "output_dir": "./results"
+    }
+}
