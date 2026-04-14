@@ -2,6 +2,7 @@
     "execution": {
         "rebuild_cpp": true,
         "python_script": "main.py",
+        "output_file": "alignment.sam",
         "output_dir": "./results"
     },
     "data": {
