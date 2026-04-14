@@ -1,7 +1,7 @@
-# 🧬 HMMAlign
+# ≣ HMMAlign
 ## High-Performance Viterbi Engine for Reference-Guided Sequence Alignment
 
-## 🧠 Overview:
+## ◈ Overview:
 
 HMMAlign is a high-performance computational framework designed for the precise mapping of genomic reads to reference sequences. By leveraging a 3-state Hidden Markov Model (HMM) and a Banded Viterbi algorithm, the engine effectively resolves indel noise and translocation speed variability inherent in modern sequencing technologies.
 
@@ -12,7 +12,7 @@ HMMAlign is a high-performance computational framework designed for the precise 
  - Status: Core Inference Engine & Traceback Verified.
 
 -----------------------------------
-## 🚀 Key Features
+## ◈ Key Features
 
 ### 1. High-Performance Banded Alignment
 Optimized for long-read sequencing (Nanopore/PacBio), the engine utilizes a banded dynamic programming approach. This restricts the search space around the main diagonal using a Sakoe-Chiba constraint, reducing complexity from $O(NM)$ to $O(N \times \text{bandwidth})$.
@@ -32,7 +32,7 @@ Designed for integration into Agentic AI and automated R&D pipelines:
 - Workflow Automation: Execution is managed via input.json, allowing for reproducible pipeline runs without recompilation.
 
 -----------------------------------
-## 🏗️ Architectural Core
+## ◈ Architectural Core
 
 ### 1. Log-Space Dynamic Programming: 
 To eliminate numerical underflow and increase speed, all probabilistic calculations are performed in log-space, replacing expensive floating-point multiplications with high-speed additions.
@@ -45,7 +45,7 @@ To eliminate numerical underflow and increase speed, all probabilistic calculati
 - **Glocal Alignment**: Supports global-local transitions, allowing a read to align to a specific sub-region of a larger reference without flank penalties.
 
 -----------------------------------
-## 📂 Project Structure
+## ◈ Project Structure
 
 ```
 HMMAlign/
@@ -68,7 +68,7 @@ HMMAlign/
 ```
 
 -----------------------------------
-## 🛠️ Getting Started
+## ◈ Getting Started
 
 ### Prerequisites
 - Python 3.12+
@@ -93,13 +93,13 @@ cd HMMAlign
 - config.json: Tune biological parameters (Match/Mismatch scores, Gap penalties).
 
 -----------------------------------
-## 🗺️ Output & Visualization
+## ◈ Output & Visualization
 The engine generates standard SAM (Sequence Alignment Map) files, making it compatible with industry-standard visualization tools like IGV (Integrative Genomics Viewer).
 
 ### Summary Statistics Output:
 ```
 ════════════════════════════════════════════════════════════
- 🧬 HMMAlign Summary Statistics
+ HMMAlign Summary Statistics
  ──────────────────────────────────────────────────────────
  Reference:  MT_human (16569 bp)
  Query:      MT_orang (16499 bp)
@@ -114,6 +114,6 @@ The engine generates standard SAM (Sequence Alignment Map) files, making it comp
 ```
 
 -----------------------------------
-## 📘 License
+## ◈ License
 
 MIT License
