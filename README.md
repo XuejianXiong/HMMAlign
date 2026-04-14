@@ -45,19 +45,6 @@ To eliminate numerical underflow and increase speed, all probabilistic calculati
 - **Glocal Alignment**: Supports global-local transitions, allowing a read to align to a specific sub-region of a larger reference without flank penalties.
 
 -----------------------------------
-## 🛠️ Tech Stack
-
-- Engine: Modern C++20 (Multi-target optimization: ARM64 & AVX2).
-
-- Build System: scikit-build-core + CMake for seamless C++ compilation within Python environments.
-
-- HPC Integration: Built to run in containerized environments (Docker/Singularity) and compatible with Slurm-based task arrays.
-
-- Environment: uv for deterministic, lightning-fast dependency management across local and remote nodes.
-
-- Interface: Python bindings for flexible research iteration and testing.
-
------------------------------------
 ## 📂 Project Structure
 
 ```
@@ -93,7 +80,7 @@ HMMAlign/
 
 1. Clone and Build:
 ```
-git clone https://github.com/your-repo/HMMAlign.git
+git clone https://github.com/XuejianXiong/HMMAlign.git
 cd HMMAlign
 ./rebuild.sh
 
