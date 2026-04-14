@@ -1,4 +1,5 @@
 {
+    "_comment": "Pipeline execution and data manifest for HMMAlign",
     "execution": {
         "rebuild_cpp": true,
         "python_script": "main.py",
