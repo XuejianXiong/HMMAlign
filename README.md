@@ -1,4 +1,4 @@
-# ≣ HMMAlign
+# ⬢ HMMAlign
 ## High-Performance Viterbi Engine for Reference-Guided Sequence Alignment
 
 ## ◈ Overview:
