@@ -1,105 +1,88 @@
-import hmmalign._core as core
-import time
 import json
+import time
 import argparse
-import os
+import hmmalign._core as hmm
 
-def load_config(path):
-    if path and os.path.exists(path):
+def load_fasta(path):
+    try:
         with open(path, 'r') as f:
-            return json.load(f)
-    return {}
+            # Skip headers, join lines, force uppercase for the C++ kernel
+            return "".join(line.strip() for line in f if not line.startswith(">")).upper()
+    except FileNotFoundError:
+        print(f"Error: File not found at {path}")
+        return None
 
-def run_test_case(name, read, ref, expected_op=None, params=None):
-    if params is None:
-        params = core.ModelParams()
-        params.bandwidth = 200
-
-    buf = core.AlignmentBuffer()
-    
-    # Use perf_counter for microsecond precision
-    start = time.perf_counter()
-    result = core.viterbi_align_buffered(read, ref, params, buf)
-    duration_ms = (time.perf_counter() - start) * 1000
-
-    print(f"🧪 Test: {name}")
-    print(f"  Score: {result.score:.2f} | Time: {duration_ms:.4f}ms")
-    # Truncate long CIGARs for readability
-    display_cigar = result.path if len(result.path) < 60 else f"{result.path[:30]}...{result.path[-20:]}"
-    print(f"  CIGAR: {display_cigar}")
-    
-    if expected_op and expected_op in result.path:
-        print("  ✅ Passed")
-    elif expected_op:
-        print(f"  ❌ Failed (Expected '{expected_op}' in CIGAR)")
-    else:
-        print("  ✅ Result Logged")
-    print("-" * 50)
-
-def test_suite(config_data):
-    print("🚀 Starting HMMAlign Suite (Soft-Clipping & HPC Optimized)\n")
-    
-    # Extract parameters for specialized tests
-    p = config_data.get('parameters', {})
-    
-    # 1. Standard Identity Match
-    run_test_case("Perfect Match", "ACGT" * 25, "ACGT" * 25, "100M")
-
-    # 2. Affine Deletion Test
-    params_affine = core.ModelParams()
-    params_affine.M_to_D = p.get('M_to_D', -5.0)
-    params_affine.D_to_D = p.get('D_to_D', -0.1)
-    params_affine.bandwidth = p.get('bandwidth', 100)
-    
-    ref_gap = "A" * 100 + "G" * 50 + "T" * 100
-    read_gap = "A" * 100 + "T" * 100
-    run_test_case("Affine Deletion (50bp)", read_gap, ref_gap, "50D", params_affine)
-
-    # 3. Soft-Clipping: Leading Adapter
-    # Read has 10bp of 'G' that doesn't exist in 'A' reference
-    run_test_case(
-        "Leading Soft-Clip (Adapter)", 
-        "GGGGGGGGGG" + "A" * 50, 
-        "A" * 100, 
-        "10S"
-    )
-
-    # 4. Soft-Clipping: Trailing Adapter
-    # Read ends with 15bp of 'C' that doesn't exist in 'T' reference
-    run_test_case(
-        "Trailing Soft-Clip", 
-        "T" * 50 + "CCCCCCCCCCCCCCC", 
-        "T" * 100, 
-        "15S"
-    )
-
-    # 5. Soft-Clipping: Dual Ends (The "Real World" case)
-    # Junk at both ends, biological match in the middle
-    run_test_case(
-        "Dual-End Soft-Clip", 
-        "GGGG" + "ACGT" * 10 + "CCCC", 
-        "AAAAA" + "ACGT" * 10 + "TTTTT", 
-        "4S"
-    )
-
-    # 6. Glocal Start Test
-    run_test_case("Glocal (Mid-stream)", "ATCG" * 10, "GGGGGGGGGG" + "ATCG" * 10 + "CCCCCC", "40M")
-
-    # 7. High-Noise Stress Test (10kb)
-    big_ref = "ACGT" * 2500 
-    big_read = "ACGT" * 2490 + "NNNNNNNNNN" 
-    run_test_case("10kb Long Read Stress", big_read, big_ref, "M")
-
-    # 8. Scatterned N-Noise
-    run_test_case("Scattered N-Noise", "A" * 400 + "NNNN" * 5 + "A" * 400, "A" * 400 + "GCGT" * 5 + "A" * 400, "M")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", help="Path to config.json")
+def main():
+    # 1. Setup CLI Argument Parsing
+    parser = argparse.ArgumentParser(description="HMMAlign Suite Benchmarking Tool")
+    parser.add_argument("--input", required=True, help="Path to input.json")
+    parser.add_argument("--config", required=True, help="Path to config.json")
     args = parser.parse_args()
 
-    # Load parameters
-    config_data = load_config(args.config)
+    # 2. Load Configurations
+    try:
+        with open(args.config, "r") as f:
+            config = json.load(f)
+        
+        with open(args.input, "r") as f:
+            inputs = json.load(f)
+    except Exception as e:
+        print(f"Failed to load JSON files: {e}")
+        return
+
+    # 3. Setup Reference and Query from input.json data block
+    # Ensure the input.json has "data": {"reference": "...", "sample": "..."}
+    ref_path = inputs.get("data", {}).get("reference")
+    sample_path = inputs.get("data", {}).get("sample")
     
-    test_suite(config_data)
+    if not ref_path or not sample_path:
+        print("Error: input.json must contain data.reference and data.sample paths.")
+        return
+
+    # Load reference and query reads
+    ref_seq = load_fasta(ref_path)
+    query_seq = load_fasta(sample_path)
+    
+    if not ref_seq or not query_seq:
+        return
+
+    # 4. Map JSON Parameters to C++ ModelParams
+    params = hmm.ModelParams()
+    p = config["parameters"]
+    params.M_to_M = p.get("M_to_M", 1.0)
+    params.M_to_I = p.get("M_to_I", -2.0)
+    params.M_to_D = p.get("M_to_D", -5.0)
+    params.I_to_M = p.get("I_to_M", -0.5)
+    params.I_to_I = p.get("I_to_I", -0.1)
+    params.D_to_M = p.get("D_to_M", -0.5)
+    params.D_to_D = p.get("D_to_D", -0.1)
+    params.bandwidth = p.get("bandwidth", 500)
+
+    # 5. Execution with Buffer Reuse
+    buf = hmm.AlignmentBuffer()
+    start_time = time.perf_counter()
+    
+    result = hmm.viterbi_align_buffered(query_seq, ref_seq, params, buf)
+    
+    end_time = time.perf_counter()
+
+    # 6. Reporting Output
+    elapsed_ms = (end_time - start_time) * 1000
+    print(f"\n" + "="*50)
+    print(f"🚀 HMMAlign Suite | Model: {config.get('model_name', 'Unknown')}")
+    print(f"="*50)
+    print(f"Ref:    {ref_path} ({len(ref_seq)} bp)")
+    print(f"Sample: {sample_path} ({len(query_seq)} bp)")
+    print(f"Time:   {elapsed_ms:.2f} ms")
+    print(f"Score:  {result.score:.2f}")
+    
+    # Clean output for the CIGAR
+    if result.path:
+        display_path = result.path if len(result.path) < 100 else f"{result.path[:97]}..."
+        print(f"CIGAR:  {display_path}")
+    else:
+        print("CIGAR:  No alignment found.")
+    print("="*50 + "\n")
+
+if __name__ == "__main__":
+    main()

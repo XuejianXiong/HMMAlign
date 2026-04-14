@@ -2,7 +2,10 @@
     "execution": {
         "rebuild_cpp": true,
         "python_script": "main.py",
-        "input_file": "sample_data.fastq",
         "output_dir": "./results"
+    },
+    "data": {
+        "reference": "data/ref.fa",
+        "sample": "data/sample.fa"
     }
 }

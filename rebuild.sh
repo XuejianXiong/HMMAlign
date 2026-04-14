@@ -36,4 +36,4 @@ else
 fi
 
 echo "🧪 Executing $PY_SCRIPT..."
-uv run python $PY_SCRIPT --config $CONFIG_FILE
+uv run python $PY_SCRIPT --input $INPUT_FILE --config $CONFIG_FILE
