@@ -1,0 +1,33 @@
+{
+    "model_name": "viterbi_affine_glocal_v1",
+    "_metadata": {
+        "description": "Configuration for Glocal HMM Alignment with Affine Gap Penalties",
+        "units": "Log-space scores (higher is better)",
+        "last_validated": "2026-04-13"
+    },
+    "parameters": {
+        "M_to_M": 1.0, 
+        "_M_to_M_doc": "Stay in Match state (Match/Mismatch)",
+        
+        "M_to_I": -2.0,
+        "_M_to_I_doc": "Gap Opening Penalty (Match -> Insertion)",
+        
+        "M_to_D": -5.0,    
+        "_M_to_D_doc": "Gap Opening Penalty (Match -> Deletion)",
+        
+        "I_to_M": -0.5,
+        "_I_to_M_doc": "Gap Extension End (Insertion -> Match)",
+        
+        "I_to_I": -0.1,
+        "_I_to_I_doc": "Gap Extension Penalty (Staying in Insertion)",
+        
+        "D_to_M": -0.5,
+        "_D_to_M_doc": "Gap Extension End (Deletion -> Match)",
+        
+        "D_to_D": -0.1,
+        "_D_to_D_doc": "Gap Extension Penalty (Staying in Deletion)",
+        
+        "bandwidth": 100,
+        "_bandwidth_doc": "The Sakoe-Chiba band width for O(N*B) complexity"
+    }
+}

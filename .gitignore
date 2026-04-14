@@ -33,7 +33,7 @@ Thumbs.db
 
 # --- Project Specific ---
 # If you create local test data or logs
-data/
+#data/
 logs/
 *.log
 bk/

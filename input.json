@@ -1,8 +1,13 @@
 {
+    "_comment": "Pipeline execution and data manifest for HMMAlign",
     "execution": {
         "rebuild_cpp": true,
         "python_script": "main.py",
-        "input_file": "sample_data.fastq",
+        "output_file": "alignment.sam",
         "output_dir": "./results"
+    },
+    "data": {
+        "reference": "data/ref.fa",
+        "sample": "data/sample.fa"
     }
 }
