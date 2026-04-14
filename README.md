@@ -97,7 +97,7 @@ cd HMMAlign
 The engine generates standard SAM (Sequence Alignment Map) files, making it compatible with industry-standard visualization tools like IGV (Integrative Genomics Viewer).
 
 ### Summary Statistics Output:
-
+```
 ════════════════════════════════════════════════════════════
  🧬 HMMAlign Summary Statistics
  ──────────────────────────────────────────────────────────
@@ -111,6 +111,7 @@ The engine generates standard SAM (Sequence Alignment Map) files, making it comp
  Score:       10259.21
  Latency:     889.37 ms
 ════════════════════════════════════════════════════════════
+```
 
 -----------------------------------
 ## 📘 License
