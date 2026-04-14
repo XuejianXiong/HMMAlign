@@ -8,25 +8,27 @@ HMMAlign is a high-performance computational framework designed for the precise 
  - Architecture: C++20 Core Inference Kernel with Pybind11 integration for MLOps orchestration.
 
  - Feature Set: $O(N \times B)$ Banded Alignment, N-Neutrality handling, and automated CIGAR-compliant traceback.
- 
- - Status: Core Inference Engine & Traceback Verified (100% Test Pass Rate)..
+
+ - Status: Core Inference Engine & Traceback Verified.
 
 -----------------------------------
 ## 🚀 Key Features
 
 ### 1. High-Performance Banded Alignment
-Optimized for long-read sequencing (Nanopore/PacBio), the engine utilizes a banded dynamic programming approach. This restricts the search space around the main diagonal, reducing complexity from $O(NM)$ to $O(N \times \text{bandwidth})$, enabling sub-millisecond alignment for 10kb+ sequences.
+Optimized for long-read sequencing (Nanopore/PacBio), the engine utilizes a banded dynamic programming approach. This restricts the search space around the main diagonal using a Sakoe-Chiba constraint, reducing complexity from $O(NM)$ to $O(N \times \text{bandwidth})$.
 
-### 2. Cross-Platform High-Performance Kernels
-The engine is designed for dual-target optimization:
+### 2. Cross-Platform Optimization
+The engine is designed for dual-target hardware optimization:
 
-- Apple Silicon (Local Dev): Optimized for ARM64 using -mcpu=apple-m1 and loop unrolling for M-series performance cores.
+- Apple Silicon: Optimized for ARM64 using -mcpu=apple-m1 and loop unrolling for M-series performance cores.
 
-- Linux HPC (Production): Targets x86_64 AVX2 and FMA instruction sets for high-throughput execution on Intel Xeon/AMD EPYC clusters.
+- Linux HPC: Targets x86_64 AVX2 and FMA instruction sets for high-throughput execution on Intel Xeon/AMD EPYC clusters.
 
 ### 3. MLOps-Ready Orchestration
 Designed for integration into Agentic AI and automated R&D pipelines:
+
 - Hybrid Configuration: Sane C++ defaults in hmm_model.hpp with dynamic overrides via config.json.
+
 - Workflow Automation: Execution is managed via input.json, allowing for reproducible pipeline runs without recompilation.
 
 -----------------------------------
@@ -36,15 +38,11 @@ Designed for integration into Agentic AI and automated R&D pipelines:
 To eliminate numerical underflow and increase speed, all probabilistic calculations are performed in log-space, replacing expensive floating-point multiplications with high-speed additions.
 
 ### 2. Robustness to Biological Noise
-The engine is rigorously tested against:
+- **Affine Gap Scoring**: Correctly models long structural variants using differentiated Gap-Open ($\gamma$) and Gap-Extend ($\epsilon$) penalties: $Score = \gamma + (n-1)\epsilon$.
 
-- **N-Neutrality**: Efficiently bridges regions of uncertainty (N-islands) without path fragmentation.
+- **Soft-Clipping**: Employs local-entry and local-exit logic to identify and clip non-matching adapter sequences (e.g., 3S14223M).
 
-- **Affine Gap Scoring**: Correctly models long structural variants (50bp+ gaps) using differentiated Gap-Open and Gap-Extend penalties.
-
-- **Soft-Clipping** (Terminal Noise): Employs local-entry and local-exit logic to identify and clip non-matching adapter sequences or low-quality terminal bases (e.g., 15S85M).
-
-- **Glocal Alignment**: Supports global-local transitions, allowing the read to align to a specific sub-region of a larger reference without incurring heavy global-alignment penalties at the flanks.
+- **Glocal Alignment**: Supports global-local transitions, allowing a read to align to a specific sub-region of a larger reference without flank penalties.
 
 -----------------------------------
 ## 🛠️ Tech Stack
@@ -71,6 +69,8 @@ HMMAlign/
 ├── hmmalign/             # Python Package Source
 │   ├── __init__.py       # Package entry point and bridge logic
 │   └── _core*.so         # Compiled C++ binary (generated)
+├── data/                 # Sample FASTA files
+├── results/              # Output (SAM files)
 ├── pyproject.toml        # Project metadata and build dependencies
 ├── CMakeLists.txt        # C++ build configuration
 ├── uv.lock               # Deterministic dependency lockfile
@@ -81,24 +81,49 @@ HMMAlign/
 ```
 
 -----------------------------------
-## 🗺️ Roadmap
+## 🛠️ Getting Started
 
-- [x] Infrastructure: Established C++/Python bridge and build system.
+### Prerequisites
+- Python 3.12+
+- uv (fast Python package manager)
+- C++ Compiler (Clang 15+ or GCC 12+)
+- jq (for JSON parsing in the runner)
 
-- [x] Alpha Engine: Implementation of the core 3-state (M, I, D) Viterbi matrix.
+### Installation & Execution
 
-- [x] Backtrace Logic: Development of the traceback path to generate CIGAR strings.
+1. Clone and Build:
+```
+git clone https://github.com/your-repo/HMMAlign.git
+cd HMMAlign
+./rebuild.sh
 
-- [ ] Benchmarking: Comparison against standard alignment tools for accuracy and throughput.
+```
 
-- [ ] Feature: Support for multi-threaded batch alignment (SIMD).
+2. Configuration:
 
-- [ ] Integration: Deployment as a tool for Agentic AI genomic workflows.
+- input.json: Define file paths and MLOps settings (e.g., rebuild_cpp: true).
+
+- config.json: Tune biological parameters (Match/Mismatch scores, Gap penalties).
 
 -----------------------------------
-## 🔬 Industry Context
+## 🗺️ Output & Visualization
+The engine generates standard SAM (Sequence Alignment Map) files, making it compatible with industry-standard visualization tools like IGV (Integrative Genomics Viewer).
 
-In the development of next-generation sequencing platforms, the transition from raw data to a mapped read is a critical computational bottleneck. HMMAlign demonstrates a modular, scalable approach to this problem, separating high-speed sequence logic from upstream feature extraction.
+### Summary Statistics Output:
+
+════════════════════════════════════════════════════════════
+ 🧬 HMMAlign Summary Statistics
+ ──────────────────────────────────────────────────────────
+ Reference:  MT_human (16569 bp)
+ Query:      MT_orang (16499 bp)
+ Status:     Success
+ ──────────────────────────────────────────────────────────
+ Identity:    75.84%
+ Matches:     14,223 bp
+ Indels:      2,273 Ins / 2,258 Del
+ Score:       10259.21
+ Latency:     889.37 ms
+════════════════════════════════════════════════════════════
 
 -----------------------------------
 ## 📘 License
