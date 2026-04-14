@@ -1,7 +1,6 @@
 # ⬢ HMMAlign
 ## High-Performance Viterbi Engine for Reference-Guided Sequence Alignment
 
------------------------------------
 ## ◈ Overview:
 
 HMMAlign is a high-performance computational framework designed for the precise mapping of genomic reads to reference sequences. By leveraging a 3-state Hidden Markov Model (HMM) and a Banded Viterbi algorithm, the engine effectively resolves indel noise and translocation speed variability inherent in modern sequencing technologies.
